@@ -1,4 +1,13 @@
-# Booking & Appointment API
+<h1 align="center">Booking &amp; Appointment API</h1>
+
+<p align="center">Sistema de reservas para barbería con FastAPI, autenticación JWT, disponibilidad y gestión de citas por rol.</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Proyecto-FastAPI%20%C2%B7%20PostgreSQL-2f4e5d" alt="FastAPI · PostgreSQL">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/Licencia-Ver%20archivo-2f4e5d" alt="Ver licencia"></a>
+</p>
+
+[Contrato de la API](Docs/API_CONTRACT.md) · [Arquitectura](Docs/ARQUITECTURE.md) · [Capturas](Docs/assets/frontend/)
 
 > **MVP Version** — Single Provider Barber Shop System
 
