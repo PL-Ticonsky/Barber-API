@@ -75,7 +75,11 @@ def verify_password(plain_password: str, password_hash: str) -> bool:
     Returns:
         True if password matches, False otherwise.
     """
-    if not plain_password or not password_hash:
+    if (
+        not plain_password
+        or not password_hash
+        or len(plain_password.encode("utf-8")) > 72
+    ):
         return False
     return _pwd_context.verify(plain_password, password_hash)
 

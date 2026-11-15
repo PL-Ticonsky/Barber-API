@@ -1,37 +1,8 @@
 "use client";
-
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import Link from "next/link";
+import { LogOut, ArrowUpRight } from "lucide-react";
 import { clearToken } from "@/lib/auth";
-
-export function AppNavbar({
-  title = "Booking",
-  email,
-}: {
-  title?: string;
-  email?: string;
-}) {
-  return (
-    <div className="sticky top-0 z-20 bg-background/80 backdrop-blur border-b">
-      <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-xl bg-primary/10 border" />
-          <div className="font-semibold">{title}</div>
-        </div>
-        <div className="flex items-center gap-3">
-          {email ? <div className="text-sm text-muted-foreground">{email}</div> : null}
-          <Separator orientation="vertical" className="h-6" />
-          <Button
-            variant="outline"
-            onClick={() => {
-              clearToken();
-              window.location.href = "/login";
-            }}
-          >
-            Logout
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
+import { Brand } from "@/components/brand";
+export function AppNavbar({ title = "Client", email }: { title?: string; email?: string }) {
+  return <header className="app-navbar"><Brand light/><span className="workspace-label">{title === "Provider" ? "EL ESCRITORIO DEL BARBERO" : "TU ESPACIO PERSONAL"}</span><div className="app-navbar-actions"><Link href="/" className="home-link">La barbería <ArrowUpRight size={15}/></Link><span className="account-email" title={email}>{email || "Cargando cuenta…"}</span><button onClick={() => { clearToken(); window.location.href = "/login"; }} className="logout-button"><LogOut size={16}/><span>Salir</span></button></div></header>;
 }

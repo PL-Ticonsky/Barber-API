@@ -1,367 +1,49 @@
-# API_CONTRACT — Booking / Appointment MVP (Single Provider)
+# Contrato HTTP — barbería de un único proveedor
 
-This document defines the HTTP API contract for the Booking MVP.
+Base local: `http://127.0.0.1:8000`, sin prefijo. El esquema completo y actualizado está en `/openapi.json` y `/docs`. Autenticación: `Authorization: Bearer <token>`.
 
-## Conventions
+## Rutas
 
-- Base URL: `/api/v1`
-- Auth: Bearer JWT (`Authorization: Bearer <token>`)
-- All datetimes are ISO 8601 with timezone offset (e.g. `2026-01-20T15:00:00-05:00`)
-- Responses are JSON
-- Errors use a consistent format (see Errors section)
+| Método y ruta | Permiso | Respuesta correcta |
+| --- | --- | --- |
+| POST /auth/register | Público | 201: id, email, role=client |
+| POST /auth/login | Público | 200: access_token, token_type=bearer |
+| GET /me | Autenticado | 200: perfil |
+| GET /availability/slots | Cliente | 200: lista de start_at/end_at |
+| POST /appointments | Cliente | 200: cita pending |
+| GET /me/appointments | Cliente | 200: sus citas |
+| GET /me/appointments/{id} | Propietario | 200: cita |
+| PATCH /me/appointments/{id}/cancel | Propietario, pending | 200: cita canceled |
+| PATCH /me/appointments/{id}/reschedule | Propietario, pending | 200: cita actualizada |
+| GET /barber/availability | Barbero | 200: bloques persistidos |
+| POST /barber/availability/bulk | Barbero | 201: reemplazo completo de bloques |
+| GET /barber/appointments | Barbero | 200: citas filtradas |
+| PATCH /barber/appointments/{id}/confirm | Barbero, pending | 200: cita confirmed |
+| PATCH /barber/appointments/{id}/cancel | Barbero, pending/confirmed | 200: cita canceled |
 
----
+## Entradas
 
-## Roles
+Registro/login: `{ "email": "client@example.com", "password": "StrongPass123!" }`. Contraseñas: mínimo 8 caracteres, máximo 72 bytes UTF-8. Email validado.
 
-- `client`: can manage only their own appointments
-- `provider`: can manage availability and all appointments
+Crear: start_at y end_at en ISO 8601 con offset; description opcional, máximo 500 caracteres. Reprogramar: start_at y end_at con las mismas restricciones. Inicio futuro, orden temporal válido, mismo día en zona del proveedor y cobertura de un bloque semanal. La duración puede variar; slot_minutes controla las opciones ofrecidas, no fija la duración admitida por POST.
 
----
+Slots: `date=YYYY-MM-DD` obligatorio, `slot_minutes=30` por defecto, rango 5–240. Excluye horas pasadas y citas pending/confirmed. `exclude_appointment_id` opcional permite reprogramar excluyendo únicamente la propia cita pending; nunca una cita ajena. Fechas sin disponibilidad devuelven [].
 
-## Auth
+Horarios: array de `{ "weekday": 0, "start_time": "09:00", "end_time": "18:00" }`; 0=lunes, 6=domingo. Horas locales sin offset. Sin solapamiento de bloques del mismo día. Array vacío elimina todos los bloques. La lectura añade id e is_active. Cambiar horarios no modifica reservas ya creadas.
 
-### POST `/auth/register`
-Register a new client user.
+Filtro de barbero: `from` y `to`, opcionales, timestamps con offset; límites inclusivos sobre inicio y fin de la cita, respectivamente. `from <= to`. `status_` opcional: pending, confirmed o canceled. La interfaz convierte los días elegidos al inicio/final del día en la zona del barbero. El listado personal no acepta filtros.
 
-**Auth:** public  
-**Body:**
-```json
-{ "email": "user@mail.com", "password": "StrongPass123!" }
-```
-**200 Response**
-```json
-{ "id": "uuid", "email": "user@mail.com", "role": "client" }
-```
-**Erros**
+Cancelación del barbero: body opcional `{ "reason": "Closed today" }`, máximo 500 caracteres. La respuesta de cita incluye cancel_reason, además de id, client_id, start_at, end_at, status, description, created_at y updated_at.
 
-409 EMAIL_ALREADY_EXISTS
+## Errores
 
-## Login
+Errores de negocio: `{ "detail": "CODIGO" }`. Errores de validación Pydantic: `{ "detail": [{ "loc": [...], "msg": "...", "type": "..." }] }`.
 
-### POST `/auth/login`
-Log in an already existing user.
+- 401: token ausente/inválido/expirado o credenciales incorrectas.
+- 403: rol incorrecto, usuario inactivo o consulta individual de cita ajena.
+- 404: cita inexistente; modificar una cita ajena también devuelve 404.
+- 400 INVALID_STATUS_TRANSITION: operación no admitida en el estado actual.
+- 409 EMAIL_ALREADY_EXISTS o APPOINTMENT_OVERLAP.
+- 422: formato/límites de entrada, INVALID_DATE_FILTER, INVALID_STATUS_FILTER, APPOINTMENT_IN_PAST, CANNOT_CROSS_LOCAL_DAY, OUTSIDE_AVAILABILITY o bloques semanales superpuestos.
 
-**Auth:** public  
-**Body:**
-```json
-{ "email": "user@mail.com", "password": "StrongPass123!" }
-```
-**200 Response**
-```json
-{
-  "access_token": "jwt",
-  "token_type": "bearer"
-}
-
-```
-**Erros**
-
-401 INVALID_CREDENTIALS
-
-
-## View Appointments (Client)
-
-### GET `/me/appointments`
-View all appointments for the authenticated client.
-
-**Auth:** client  
-**Headers:** `Authorization: Bearer <token>`
-
-**Query (optional):**
-- `from`: ISO datetime
-- `to`: ISO datetime
-- `status`: pending | confirmed | canceled
-
-**200 Response**
-```json
-[
-  {
-    "id": "uuid",
-    "start_at": "2026-01-21T15:00:00Z",
-    "end_at": "2026-01-21T15:30:00Z",
-    "status": "confirmed"
-  }
-]
-``` 
-
-**Erros**
-401 UNAUTHORIZED (missing/invalid token)
-
-## View One Appointment (Client)
-
-### GET `/me/appointments/{id}`
-View one appointments for the authenticated client.
-
-**Auth:** client  
-**Headers:** `Authorization: Bearer <token>`
-
-
-**200 Response**
-```json
-
-  {
-    "id": "uuid",
-    "start_at": "2026-01-21T15:00:00Z",
-    "end_at": "2026-01-21T15:30:00Z",
-    "status": "confirmed"
-  }
-
-``` 
-
-**Erros**
-401 UNAUTHORIZED (missing/invalid token)
-
-## View Availability Slots (Client)
-
-### GET `/availability/slots`
-List available time slots for booking.
-
-**Auth:** client  
-**Headers:** `Authorization: Bearer <token>`
-
-**Query (required):**
-- `date`: YYYY-MM-DD
-
-**Query (optional):**
-- `slot_minutes`: integer (default 30)
-
-**200 Response**
-```json
-[
-  { "start_at": "2026-01-21T15:00:00Z", "end_at": "2026-01-21T15:30:00Z" },
-  { "start_at": "2026-01-21T15:30:00Z", "end_at": "2026-01-21T16:00:00Z" }
-]
-```
-
-**Erros**
-401 UNAUTHORIZED (missing/invalid token)
-
-
-## Create Appointment
-
-### POST `/appointments`
-Create an appointment request for the authenticated client.
-
-**Auth:** client  
-**Headers:** `Authorization: Bearer <token>`
-
-**Body**
-```json
-{
-  "start_at": "2026-01-21T10:00:00-05:00",
-  "end_at": "2026-01-21T10:30:00-05:00",
-  "description": "Haircut"
-}
-```
-**200 Response**
-```json
-{
-  "id": "uuid",
-  "client_id": "uuid",
-  "start_at": "2026-01-21T15:00:00Z",
-  "end_at": "2026-01-21T15:30:00Z",
-  "status": "pending",
-  "description": "Haircut",
-  "created_at": "2026-01-20T18:00:00Z"
-}
-```
-**Erros**
-
-401 UNAUTHORIZED
-
-409 APPOINTMENT_OVERLAP
-
-422 OUTSIDE_AVAILABILITY
-
-422 INVALID_TIME_RANGE
-
-## Modify Appointment
-
-### PATCH `/me/appointments/{id}/reschedule`
-
-Modify an appointment of an already schedule appointment for the authenticated client
-
-**Auth:** client  
-**Headers:** `Authorization: Bearer <token>`
-
-**Body**
-```json
-{
-  "start_at": "2026-01-21T10:00:00-05:00",
-  "end_at": "2026-01-21T10:30:00-05:00"
-}
-```
-**200 Response**
-```json
-{
-  "id": "uuid",
-  "client_id": "uuid",
-  "start_at": "2026-01-21T15:00:00Z",
-  "end_at": "2026-01-21T15:30:00Z",
-  "status": "pending",
-  "updated_at": "2026-01-20T18:00:00Z"
-}
-```
-**Erros**
-401 UNAUTHORIZED
-
-403 FORBIDDEN
-
-404 APPOINTMENT_NOT_FOUND
-
-409 APPOINTMENT_OVERLAP
-
-422 OUTSIDE_AVAILABILITY
-
-400 INVALID_STATUS_TRANSITION
-
-
-## Cancel Appointment
-### PATCH `/me/appointments/{id}/cancel`
-
-Cancel an existing appointment for the authenticated client.
-
-**Auth:** client  
-**Headers:** `Authorization: Bearer <token>`
-
-**200 Response**
-```json
-{
-  "id": "uuid",
-  "client_id": "uuid",
-  "start_at": "2026-01-21T15:00:00Z",
-  "end_at": "2026-01-21T15:30:00Z",
-  "status": "canceled",
-  "updated_at": "2026-01-20T18:00:00Z"
-}
-```
-**Erros**
-401 UNAUTHORIZED
-
-403 FORBIDDEN
-
-404 APPOINTMENT_NOT_FOUND
-
-400 INVALID_STATUS_TRANSITION
-
-## View all appointments (barber)
-### GET `/barber/appointments`
-View all appointments (barber agenda).
-
-**Auth:** provider  
-**Headers:** `Authorization: Bearer <token>`
-
-**Query (optional):**
-- `from`: ISO datetime
-- `to`: ISO datetime
-- `status`: pending | confirmed | canceled
-
-**200 Response**
-```json
-[
-  {
-    "id": "uuid",
-    "client_id": "uuid",
-    "start_at": "2026-01-21T15:00:00Z",
-    "end_at": "2026-01-21T15:30:00Z",
-    "status": "pending"
-  }
-]
-``` 
-
-**Erros** 
-401 UNAUTHORIZED,
-403 FORBIDDEN (if not provider)
-
-
-
-## Create Barber Availability (bulk)
-
-### POST `/barber/availability/bulk`
-
-**Auth:** provider  
-**Headers:** `Authorization: Bearer <token>`
-
-**Body**
-```json
-[
-  { "weekday": 0, "start_time": "09:00", "end_time": "12:00" },
-  { "weekday": 0, "start_time": "14:00", "end_time": "18:00" }
-]
-```
-**201 Response**
-```json
-[
-  { "id": "uuid", "weekday": 0, "start_time": "09:00", "end_time": "12:00", "is_active": true },
-  { "id": "uuid", "weekday": 0, "start_time": "14:00", "end_time": "18:00", "is_active": true }
-]
-
-```
-**Errors**
-
-401 UNAUTHORIZED
-
-403 FORBIDDEN
-
-422 INVALID_TIME_RANGE
-
-## Confirm Appointment (Barber)
-
-### PATCH `/barber/appointments/{id}/confirm`
-Confirm an appointment as the barber (provider).
-
-**Auth:** provider  
-**Headers:** `Authorization: Bearer <token>`
-
-**200 Response**
-```json
-{
-  "id": "uuid",
-  "client_id": "uuid",
-  "start_at": "2026-01-21T15:00:00Z",
-  "end_at": "2026-01-21T15:30:00Z",
-  "status": "confirmed",
-  "updated_at": "2026-01-20T18:00:00Z"
-}
-```
-**Errors**
-401 UNAUTHORIZED
-
-403 FORBIDDEN
-
-404 APPOINTMENT_NOT_FOUND
-
-400 INVALID_STATUS_TRANSITION
-## Cancel Appointment (Barber)
-
-### PATCH `/barber/appointments/{id}/cancel`
-Cancel an appointment as the barber (provider).
-
-**Auth:** provider  
-**Headers:** `Authorization: Bearer <token>`
-
-**Body (optional)**
-```json
-{ "reason": "Barber unavailable" }
-```
-**200 Response**
-```json
-{
-  "id": "uuid",
-  "client_id": "uuid",
-  "start_at": "2026-01-21T15:00:00Z",
-  "end_at": "2026-01-21T15:30:00Z",
-  "status": "canceled",
-  "cancel_reason": "Barber unavailable",
-  "updated_at": "2026-01-20T18:00:00Z"
-}
-```
-**Errors**
-401 UNAUTHORIZED
-
-403 FORBIDDEN
-
-404 APPOINTMENT_NOT_FOUND
-
-400 INVALID_STATUS_TRANSITION
+Dos reservas concurrentes para el mismo intervalo no pueden persistir ambas. El intervalo es semiabierto [inicio, fin), por lo que reservas contiguas son válidas. Los roles y la propiedad se verifican en el backend.

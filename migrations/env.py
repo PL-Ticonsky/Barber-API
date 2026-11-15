@@ -32,7 +32,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Inject the runtime DATABASE_URL (from .env) into Alembic configuration
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 # Target metadata for 'alembic revision --autogenerate'
 target_metadata = Base.metadata

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.security import hash_password, verify_password, create_access_token
 from app.models.user import User, UserRole
@@ -30,6 +31,7 @@ from app.repositories.user_repo import get_user_by_email, create_user
 # ---------------------------
 # Domain errors (service layer)
 # ---------------------------
+
 
 class EmailAlreadyExistsError(ValueError):
     """Raised when trying to register with an email that already exists."""
@@ -47,6 +49,7 @@ class InactiveUserError(ValueError):
 # Return types
 # ---------------------------
 
+
 @dataclass(frozen=True)
 class RegisterResult:
     id: str
@@ -63,6 +66,7 @@ class LoginResult:
 # ---------------------------
 # Use-cases
 # ---------------------------
+
 
 def register_client(db: Session, *, email: str, password: str) -> RegisterResult:
     """
@@ -87,9 +91,15 @@ def register_client(db: Session, *, email: str, password: str) -> RegisterResult
         role=UserRole.client,
     )
 
-    create_user(db, user=user)
-    db.commit()      # persist
-    db.refresh(user) # load generated fields
+    try:
+        create_user(db, user=user)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if getattr(exc.orig, "sqlstate", None) == "23505":
+            raise EmailAlreadyExistsError("EMAIL_ALREADY_EXISTS") from exc
+        raise
+    db.refresh(user)  # load generated fields
 
     return RegisterResult(
         id=str(user.id),

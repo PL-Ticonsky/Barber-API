@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import AwareDatetime
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_provider
@@ -21,6 +22,7 @@ from app.services.appointment_service import (
 
 router = APIRouter(prefix="/barber", tags=["barber"])
 
+
 @router.get(
     "/appointments",
     response_model=list[AppointmentOut],
@@ -29,23 +31,24 @@ router = APIRouter(prefix="/barber", tags=["barber"])
 def get_all_appointments(
     db: Session = Depends(get_db),
     _provider: User = Depends(require_provider),
-    from_: datetime | None = None,
-    to: datetime | None = None,
+    from_: AwareDatetime | None = Query(None, alias="from"),
+    to: AwareDatetime | None = None,
     status_: str | None = None,
 ):
     """
     List barber appointments with optional filters.
     Query params:
-      - from_ (datetime)  (nota: 'from' es keyword, por eso from_)
+      - from (timezone-aware datetime)
       - to (datetime)
       - status_ (pending|confirmed|canceled)
     """
     try:
         return list_barber_appointments(db, dt_from=from_, dt_to=to, status=status_)
     except ValueError as e:
-        if str(e) == "INVALID_STATUS_FILTER":
-            raise HTTPException(status_code=422, detail="INVALID_STATUS_FILTER")
+        if str(e) in {"INVALID_STATUS_FILTER", "INVALID_DATE_FILTER"}:
+            raise HTTPException(status_code=422, detail=str(e))
         raise
+
 
 @router.patch(
     "/appointments/{appointment_id}/confirm",
@@ -64,6 +67,7 @@ def confirm_appointment(
     except InvalidStatusTransitionError:
         raise HTTPException(status_code=400, detail="INVALID_STATUS_TRANSITION")
 
+
 @router.patch(
     "/appointments/{appointment_id}/cancel",
     response_model=AppointmentOut,
@@ -77,7 +81,9 @@ def cancel_appointment(
 ):
     reason = payload.reason if payload is not None else None
     try:
-        return cancel_appointment_as_provider(db, appointment_id=appointment_id, reason=reason)
+        return cancel_appointment_as_provider(
+            db, appointment_id=appointment_id, reason=reason
+        )
     except AppointmentNotFoundError:
         raise HTTPException(status_code=404, detail="APPOINTMENT_NOT_FOUND")
     except InvalidStatusTransitionError:

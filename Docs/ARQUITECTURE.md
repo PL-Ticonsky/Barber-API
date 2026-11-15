@@ -33,7 +33,7 @@ Rules:
 - Overlap is checked in service layer and enforced at DB-level to prevent race conditions.
 ---
 
-## Proposed folder structure
+## Folder structure
 
 ```txt
 app/
@@ -49,8 +49,6 @@ app/
   core/
     config.py
     security.py
-    errors.py
-    logging.py
   db/
     session.py
     base.py
@@ -60,10 +58,8 @@ app/
     appointment.py
   schemas/
     auth.py
-    user.py
     availability.py
     appointment.py
-    common.py
   repositories/
     user_repo.py
     availability_repo.py
@@ -72,7 +68,9 @@ app/
     auth_service.py
     availability_service.py
     appointment_service.py
-  migrations/
-    env.py
-    versions/
+migrations/
+  env.py
+  versions/
 tests/
+
+```

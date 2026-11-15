@@ -16,12 +16,20 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_provider
 from app.db.session import get_db
 from app.schemas.availability import AvailabilityBlockIn, AvailabilityBlockOut
-from app.services.availability_service import replace_availability, AvailabilityOverlapError
+from app.services.availability_service import (
+    replace_availability,
+    AvailabilityOverlapError,
+)
+from app.repositories.availability_repo import list_availability
 
 router = APIRouter(prefix="/barber/availability", tags=["barber-availability"])
 
 
-@router.post("/bulk", response_model=list[AvailabilityBlockOut], status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/bulk",
+    response_model=list[AvailabilityBlockOut],
+    status_code=status.HTTP_201_CREATED,
+)
 def bulk_replace_availability(
     payload: list[AvailabilityBlockIn],
     db: Session = Depends(get_db),
@@ -48,3 +56,19 @@ def bulk_replace_availability(
         ]
     except AvailabilityOverlapError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("", response_model=list[AvailabilityBlockOut])
+def get_availability(
+    db: Session = Depends(get_db), _provider=Depends(require_provider)
+):
+    return [
+        AvailabilityBlockOut(
+            id=str(b.id),
+            weekday=b.weekday,
+            start_time=b.start_time,
+            end_time=b.end_time,
+            is_active=b.is_active,
+        )
+        for b in list_availability(db)
+    ]

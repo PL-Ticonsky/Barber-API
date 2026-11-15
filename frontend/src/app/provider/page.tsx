@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, errorMessage } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { Appointment, Me } from "@/lib/types";
-import { fmtDateTimeLocal } from "@/lib/time";
+import { fmtDateTimeLocal, providerDayBoundary } from "@/lib/time";
 
+import { DashboardIntro } from "@/components/dashboard-intro";
 import { AppNavbar } from "@/components/app-navbar";
 import { ProviderSidebar } from "@/components/provider-sidebar";
 import { EmptyState } from "@/components/empty-state";
@@ -17,11 +18,13 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 
 type StatusFilter = "pending" | "confirmed" | "canceled";
+
+const statusLabel: Record<string, string> = { pending: "Pendiente", confirmed: "Confirmada", canceled: "Cancelada" };
 
 function statusBadgeVariant(s: string) {
   if (s === "confirmed") return "default";
@@ -36,18 +39,18 @@ type AvailabilityBlock = {
 };
 
 const weekdays = [
-  { k: 0, label: "Mon" },
-  { k: 1, label: "Tue" },
-  { k: 2, label: "Wed" },
-  { k: 3, label: "Thu" },
-  { k: 4, label: "Fri" },
-  { k: 5, label: "Sat" },
-  { k: 6, label: "Sun" },
+  { k: 0, label: "Lunes" },
+  { k: 1, label: "Martes" },
+  { k: 2, label: "Miércoles" },
+  { k: 3, label: "Jueves" },
+  { k: 4, label: "Viernes" },
+  { k: 5, label: "Sábado" },
+  { k: 6, label: "Domingo" },
 ];
 
 export default function ProviderDashboard() {
   const [me, setMe] = useState<Me | null>(null);
-  const token = useMemo(() => getToken(), []);
+
 
   const [view, setView] = useState<"appointments" | "availability">("appointments");
 
@@ -66,17 +69,14 @@ export default function ProviderDashboard() {
   const [confirmLoadingId, setConfirmLoadingId] = useState<string | null>(null);
 
   // availability
-  const [blocks, setBlocks] = useState<AvailabilityBlock[]>([
-    { weekday: 0, start_time: "09:00", end_time: "18:00" },
-    { weekday: 1, start_time: "09:00", end_time: "18:00" },
-    { weekday: 2, start_time: "09:00", end_time: "18:00" },
-    { weekday: 3, start_time: "09:00", end_time: "18:00" },
-    { weekday: 4, start_time: "09:00", end_time: "18:00" },
-  ]);
+  const [blocks, setBlocks] = useState<AvailabilityBlock[]>([]);
+  const [availabilityLoaded, setAvailabilityLoaded] = useState(false);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState("");
   const [saveAvailLoading, setSaveAvailLoading] = useState(false);
 
   useEffect(() => {
-    if (!token) {
+    if (!getToken()) {
       window.location.href = "/login";
       return;
     }
@@ -89,29 +89,40 @@ export default function ProviderDashboard() {
           return;
         }
         setMe(m);
-        await loadAppointments();
+        await Promise.all([loadAppointments(), loadAvailability()]);
       } catch {
         // api() maneja 401
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, []);
+
+  async function loadAvailability() {
+    setAvailabilityLoading(true); setAvailabilityLoaded(false); setAvailabilityError("");
+    try {
+      const data = await api<(AvailabilityBlock & { is_active: boolean })[]>("/barber/availability");
+      setBlocks(data.filter(b => b.is_active).map(b => ({ weekday: b.weekday, start_time: b.start_time, end_time: b.end_time })));
+      setAvailabilityLoaded(true);
+    } catch (error) { setAvailabilityError(errorMessage(error, "No pudimos cargar los horarios guardados.")); }
+    finally { setAvailabilityLoading(false); }
+  }
 
   async function loadAppointments() {
     setLoading(true);
     try {
       const qs = new URLSearchParams();
       qs.set("status_", status);
-      if (from) qs.set("from", from);
-      if (to) qs.set("to", to);
+      if (from && to && from > to) throw new Error("La fecha inicial debe ser anterior a la final.");
+      if (from) qs.set("from", providerDayBoundary(from));
+      if (to) qs.set("to", providerDayBoundary(to, true));
 
       const data = await api<Appointment[]>(
         `/barber/appointments?${qs.toString()}`,
         { method: "GET" }
       );
       setItems(data);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to load appointments");
+    } catch (err) {
+      toast.error(errorMessage(err, "No pudimos cargar las citas."));
     } finally {
       setLoading(false);
     }
@@ -122,10 +133,10 @@ export default function ProviderDashboard() {
     setConfirmLoadingId(id);
     try {
       await api(`/barber/appointments/${id}/confirm`, { method: "PATCH" });
-      toast.success("Confirmed");
+      toast.success("Cita confirmada.");
       await loadAppointments();
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to confirm");
+    } catch (err) {
+      toast.error(errorMessage(err, "No pudimos confirmar la cita."));
     } finally {
       setConfirmLoadingId(null);
     }
@@ -139,12 +150,12 @@ export default function ProviderDashboard() {
         method: "PATCH",
         body: JSON.stringify(cancelReason?.trim() ? { reason: cancelReason.trim() } : {}),
       });
-      toast.success("Canceled");
+      toast.success("Cita cancelada.");
       setCancel(null);
       setCancelReason("");
       await loadAppointments();
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to cancel");
+    } catch (err) {
+      toast.error(errorMessage(err, "No pudimos cancelar la cita."));
     } finally {
       setCancelLoading(false);
     }
@@ -163,16 +174,16 @@ export default function ProviderDashboard() {
   }
 
   async function saveAvailability() {
-    if (saveAvailLoading) return;
+    if (saveAvailLoading || !availabilityLoaded || availabilityLoading) return;
 
     // validación mínima UX
     for (const b of blocks) {
       if (!b.start_time || !b.end_time) {
-        toast.error("Fill all start/end times");
+        toast.error("Completa las horas de inicio y fin.");
         return;
       }
       if (b.start_time >= b.end_time) {
-        toast.error("Start time must be before end time");
+        toast.error("La hora de inicio debe ser anterior al final.");
         return;
       }
     }
@@ -183,60 +194,61 @@ export default function ProviderDashboard() {
         method: "POST",
         body: JSON.stringify(blocks),
       });
-      toast.success("Availability saved");
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to save availability");
+      toast.success("Tus horarios quedaron guardados.");
+    } catch (err) {
+      toast.error(errorMessage(err, "No pudimos guardar tus horarios."));
     } finally {
       setSaveAvailLoading(false);
     }
   }
 
   return (
-    <div>
+    <div id="top" className="dashboard-shell">
       <AppNavbar title="Provider" email={me?.email} />
 
-      <main className="mx-auto max-w-5xl px-4 py-6">
-        <div className="flex flex-col md:flex-row gap-4">
+      <main id="main-content" className="dashboard-page">
+        <DashboardIntro provider/>
+        <div className="provider-layout">
           <ProviderSidebar active={view} onChange={setView} />
 
-          <div className="flex-1">
+          <div className="provider-content">
             {view === "appointments" ? (
-              <Card className="p-5 rounded-2xl">
+              <Card className="dashboard-panel">
                 <div className="flex flex-col gap-4">
                   <div>
-                    <div className="text-lg font-semibold">Appointments</div>
+                    <div className="text-lg font-semibold">Agenda de citas</div>
                     <div className="text-sm text-muted-foreground">
-                      Filter by status and optional date range.
+                      Cada cliente, a su tiempo. Filtra y organiza las citas de tu barbería.
                     </div>
                   </div>
 
-                  <div className="grid md:grid-cols-4 gap-3 items-end">
+                  <div className="provider-filters">
                     <div className="grid gap-2">
-                      <Label>Status</Label>
+                      <Label>Estado</Label>
                       <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Status" />
+                          <SelectValue placeholder="Estado" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="pending">pending</SelectItem>
-                          <SelectItem value="confirmed">confirmed</SelectItem>
-                          <SelectItem value="canceled">canceled</SelectItem>
+                          <SelectItem value="pending">Pendientes</SelectItem>
+                          <SelectItem value="confirmed">Confirmadas</SelectItem>
+                          <SelectItem value="canceled">Canceladas</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
 
                     <div className="grid gap-2">
-                      <Label>From (optional)</Label>
-                      <Input value={from} onChange={(e) => setFrom(e.target.value)} placeholder="YYYY-MM-DD" />
+                      <Label>Desde (opcional)</Label>
+                      <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} placeholder="YYYY-MM-DD" />
                     </div>
 
                     <div className="grid gap-2">
-                      <Label>To (optional)</Label>
-                      <Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="YYYY-MM-DD" />
+                      <Label>Hasta (opcional)</Label>
+                      <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} placeholder="YYYY-MM-DD" />
                     </div>
 
                     <Button onClick={loadAppointments} disabled={loading}>
-                      {loading ? "Loading..." : "Apply"}
+                      {loading ? "Cargando…" : "Aplicar filtros"}
                     </Button>
                   </div>
 
@@ -248,22 +260,23 @@ export default function ProviderDashboard() {
                         <Skeleton className="h-20 rounded-2xl" />
                       </>
                     ) : items.length === 0 ? (
-                      <EmptyState title="No appointments yet" />
+                      <EmptyState title="Tu agenda tiene espacio" />
                     ) : (
                       items.map((a) => (
-                        <Card key={a.id} className="p-4 rounded-2xl">
+                        <Card key={a.id} className="appointment-card">
                           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                             <div>
                               <div className="font-medium">
                                 {fmtDateTimeLocal(a.start_at)} → {fmtDateTimeLocal(a.end_at)}
                               </div>
                               <div className="text-sm text-muted-foreground">
-                                client_id: {a.client_id || "—"} · {a.description || "—"}
+                                Cliente · {a.client_id?.slice(0, 8) || "—"} · {a.description || "—"}
+                            {a.cancel_reason && <p>Motivo de cancelación: {a.cancel_reason}</p>}
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-2">
-                              <Badge variant={statusBadgeVariant(a.status)}>{a.status}</Badge>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge className={`status-badge status-${a.status}`} variant={statusBadgeVariant(a.status)}>{statusLabel[a.status]}</Badge>
 
                               {a.status === "pending" ? (
                                 <>
@@ -271,13 +284,13 @@ export default function ProviderDashboard() {
                                     onClick={() => confirm(a.id)}
                                     disabled={confirmLoadingId === a.id}
                                   >
-                                    {confirmLoadingId === a.id ? "Confirming..." : "Confirm"}
+                                    {confirmLoadingId === a.id ? "Confirmando…" : "Confirmar"}
                                   </Button>
                                   <Button
                                     variant="destructive"
                                     onClick={() => setCancel({ id: a.id })}
                                   >
-                                    Cancel
+                                    Cancelar
                                   </Button>
                                 </>
                               ) : a.status === "confirmed" ? (
@@ -285,7 +298,7 @@ export default function ProviderDashboard() {
                                   variant="destructive"
                                   onClick={() => setCancel({ id: a.id })}
                                 >
-                                  Cancel
+                                  Cancelar
                                 </Button>
                               ) : null}
                             </div>
@@ -297,90 +310,93 @@ export default function ProviderDashboard() {
                 </div>
 
                 <Dialog open={!!cancel} onOpenChange={(o) => !o && setCancel(null)}>
-                  <DialogContent className="rounded-2xl">
+                  <DialogContent className="booking-dialog">
                     <DialogHeader>
-                      <DialogTitle>Cancel appointment</DialogTitle>
+                      <DialogTitle>Cancelar cita</DialogTitle>
+                  <DialogDescription>Revisa los detalles antes de guardar los cambios.</DialogDescription>
                     </DialogHeader>
 
                     <div className="grid gap-2">
-                      <Label>Reason (optional)</Label>
+                      <Label>Motivo (opcional)</Label>
                       <Textarea
                         value={cancelReason}
-                        onChange={(e) => setCancelReason(e.target.value)}
-                        placeholder="Client no-show, etc."
+                        maxLength={500} onChange={(e) => setCancelReason(e.target.value)}
+                        placeholder="Cuéntale al cliente el motivo…"
                       />
                     </div>
 
                     <DialogFooter className="gap-2">
                       <Button variant="outline" onClick={() => setCancel(null)}>
-                        Close
+                        Cerrar
                       </Button>
                       <Button
                         variant="destructive"
                         onClick={cancelAppointment}
                         disabled={cancelLoading}
                       >
-                        {cancelLoading ? "Canceling..." : "Cancel"}
+                        {cancelLoading ? "Cancelando…" : "Cancelar"}
                       </Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
               </Card>
             ) : (
-              <Card className="p-5 rounded-2xl">
+              <Card className="dashboard-panel">
                 <div>
-                  <div className="text-lg font-semibold">Availability</div>
+                  <div className="text-lg font-semibold">Horarios de atención</div>
                   <div className="text-sm text-muted-foreground">
-                    Weekly blocks. Save sends a full bulk list.
+                    Define cuándo recibes clientes. Los cambios se aplican a las próximas reservas.
                   </div>
                 </div>
 
-                <div className="mt-6 grid gap-4">
+                {availabilityLoading && <p role="status">Cargando tus horarios guardados…</p>}
+                {availabilityError && <div role="alert"><p>{availabilityError}</p><Button onClick={loadAvailability}>Reintentar carga</Button></div>}
+                <fieldset disabled={!availabilityLoaded || availabilityLoading || saveAvailLoading} className="mt-6 grid gap-4">
                   {weekdays.map((d) => {
                     const dayBlocks = blocks
                       .map((b, idx) => ({ b, idx }))
                       .filter((x) => x.b.weekday === d.k);
 
                     return (
-                      <Card key={d.k} className="p-4 rounded-2xl">
+                      <Card key={d.k} className="appointment-card">
                         <div className="flex items-center justify-between">
                           <div className="font-medium">{d.label}</div>
                           <Button variant="outline" onClick={() => addBlock(d.k)}>
-                            Add block
+                            Añadir horario
                           </Button>
                         </div>
 
                         <div className="mt-3 grid gap-2">
                           {dayBlocks.length === 0 ? (
                             <div className="text-sm text-muted-foreground">
-                              No blocks for this day.
+                              Sin atención programada.
                             </div>
                           ) : (
                             dayBlocks.map(({ b, idx }) => (
-                              <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                                <div className="col-span-5">
-                                  <Label>Start</Label>
+                              <div key={idx} className="availability-row">
+                                <div className="availability-time">
+                                  <Label>Desde</Label>
                                   <Input
-                                    value={b.start_time}
+                                    type="time" step="1" value={b.start_time}
                                     onChange={(e) => updateBlock(idx, { start_time: e.target.value })}
                                     placeholder="09:00"
                                   />
                                 </div>
-                                <div className="col-span-5">
-                                  <Label>End</Label>
+                                <div className="availability-time">
+                                  <Label>Hasta</Label>
                                   <Input
-                                    value={b.end_time}
+                                    type="time" step="1" value={b.end_time}
                                     onChange={(e) => updateBlock(idx, { end_time: e.target.value })}
                                     placeholder="18:00"
                                   />
                                 </div>
-                                <div className="col-span-2">
+                                <div className="availability-remove">
                                   <Button
                                     variant="destructive"
                                     className="w-full"
                                     onClick={() => removeBlock(idx)}
                                   >
-                                    Remove
+                                    Eliminar
                                   </Button>
                                 </div>
                               </div>
@@ -390,11 +406,11 @@ export default function ProviderDashboard() {
                       </Card>
                     );
                   })}
-                </div>
+                </fieldset>
 
                 <div className="mt-6 flex justify-end">
-                  <Button onClick={saveAvailability} disabled={saveAvailLoading}>
-                    {saveAvailLoading ? "Saving..." : "Save availability"}
+                  <Button onClick={saveAvailability} disabled={saveAvailLoading || !availabilityLoaded || availabilityLoading}>
+                    {saveAvailLoading ? "Guardando…" : "Guardar horarios"}
                   </Button>
                 </div>
               </Card>

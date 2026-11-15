@@ -1,70 +1,25 @@
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import Image from "next/image";
+import { ArrowUpRight, ArrowRight, Scissors, CalendarDays, Check, MoveDown } from "lucide-react";
+import { SiteHeader } from "@/components/site-header";
+import { SiteFooter } from "@/components/site-footer";
 
+const services = [
+  { number: "01", name: "EL CLÁSICO", detail: "Un buen corte nunca pasa de moda.", body: "Líneas limpias, tijera y un acabado que habla por ti. El punto de partida para encontrar tu estilo.", style: "cream", icon: "✂" },
+  { number: "02", name: "EL DEGRADADO", detail: "Precisión en cada transición.", body: "Laterales definidos, textura y personalidad. Un clásico de hoy, con toda la atención al detalle.", style: "yellow", icon: "✦" },
+  { number: "03", name: "EL RITUAL COMPLETO", detail: "Corte y barba, en buena compañía.", body: "Pon a punto tu cabello y dale forma a tu barba. Cuéntanos qué buscas en la descripción de tu cita.", style: "pink", icon: "〰" },
+];
 export default function Landing() {
-  return (
-    <main className="mx-auto max-w-5xl px-4 py-10">
-      <div className="flex flex-col gap-10">
-        <div className="flex items-start justify-between gap-6">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm text-muted-foreground">
-              <span className="h-2 w-2 rounded-full bg-primary" />
-              MVP Booking — Single Provider
-            </div>
-            <h1 className="mt-4 text-4xl md:text-5xl font-semibold tracking-tight">
-              Book your haircut in seconds
-            </h1>
-            <p className="mt-3 text-base md:text-lg text-muted-foreground max-w-xl">
-              Pick a time slot, confirm, done. Simple experience for clients and a clean dashboard for the barber.
-            </p>
-            <div className="mt-6 flex gap-3">
-              <Button asChild>
-                <Link href="/login">Login</Link>
-              </Button>
-              <Button variant="outline" asChild>
-                <Link href="/register">Create account</Link>
-              </Button>
-            </div>
-          </div>
-
-          <Card className="hidden md:block w-[360px] p-5 rounded-2xl shadow-sm">
-            <div className="text-sm font-medium">How it works</div>
-            <ul className="mt-3 text-sm text-muted-foreground space-y-2 list-disc pl-4">
-              <li>Choose date → load slots</li>
-              <li>Request appointment (pending)</li>
-              <li>Barber confirms or cancels</li>
-            </ul>
-          </Card>
-        </div>
-
-        <div className="grid md:grid-cols-3 gap-4">
-          {[
-            ["Working hours", "Availability is managed by the barber weekly."],
-            ["Fast booking", "Slots are loaded from the backend in real time."],
-            ["Clear status", "Pending, confirmed, canceled — always visible."],
-          ].map(([t, d]) => (
-            <Card key={t} className="p-5 rounded-2xl">
-              <div className="font-medium">{t}</div>
-              <div className="mt-1 text-sm text-muted-foreground">{d}</div>
-            </Card>
-          ))}
-        </div>
-
-        <Card className="p-6 rounded-2xl">
-          <div className="font-medium">Mini FAQ</div>
-          <div className="mt-3 grid gap-3 text-sm text-muted-foreground">
-            <div>
-              <span className="font-medium text-foreground">Do I need an account?</span>{" "}
-              Yes, clients create an account to manage bookings.
-            </div>
-            <div>
-              <span className="font-medium text-foreground">Can I reschedule?</span>{" "}
-              Pending appointments can be rescheduled from “My Appointments”.
-            </div>
-          </div>
-        </Card>
-      </div>
-    </main>
-  );
+  return <div id="top" className="landing"><SiteHeader /><main id="main-content">
+    <section className="hero-section">
+      <div className="hero-copy"><p className="overline"><Scissors size={17} /> EL OFICIO DE HACERTE VER BIEN</p><h1>BUEN CORTE.<br />BUENA<br /><span>ACTITUD.</span></h1><p className="hero-description">El encanto de la barbería de siempre.<br />El estilo que va contigo, hoy.</p><div className="hero-actions"><Link href="/login" className="v-button coral">QUIERO MI CITA <ArrowUpRight size={20}/></Link><a className="text-link" href="#servicios">Encuentra tu estilo <ArrowRight size={17}/></a></div><p className="booking-note"><CalendarDays size={15}/> Elige tu horario. Solicita tu cita. Listo.</p></div>
+      <div className="hero-visual"><div className="hero-frame"><Image src="/images/barber-cut.jpg" alt="Un barbero dando forma a un corte con máquina frente al espejo" fill priority sizes="(max-width: 760px) 90vw, 46vw" /><div className="photo-caption"><span>EL DETALLE HACE LA DIFERENCIA</span><Scissors size={24}/></div></div><div className="heritage-badge" aria-hidden="true"><span>DE LA VIEJA</span><Scissors size={35} strokeWidth={1.3}/><strong>ESCUELA</strong><small>CON ESTILO PROPIO</small></div><span className="photo-side-label">CORTES CON CARÁCTER — SIN COMPLICACIONES</span><span className="hero-spark" aria-hidden="true">✳</span></div>
+    </section>
+    <div className="ribbon" aria-label="Cortes clásicos, estilo propio y reservas online"><span>CORTES CLÁSICOS</span><b>✦</b><span>ESTILO PROPIO</span><b>✦</b><span>RESERVA ONLINE</span><b>✦</b><span>BUENA ACTITUD</span><b>✦</b></div>
+    <section id="servicios" className="services-section section-wrap"><div className="section-heading"><div><p className="overline">01 / A TU MANERA</p><h2>TU ESTILO.<br /><span>NUESTRO OFICIO.</span></h2></div><p>Hay muchas formas de llevarlo.<br />Encuentra la tuya y cuéntanos<br />qué tienes en mente al reservar.</p></div><div className="service-grid">{services.map(s=><article className={`service-card ${s.style}`} key={s.number}><div className="service-top"><span>EL MENÚ DEL BUEN ESTILO</span><span>{s.number}</span></div><span className="service-icon" aria-hidden="true">{s.icon}</span><h3>{s.name}</h3><p className="service-lead">{s.detail}</p><p>{s.body}</p><Link href="/login">RESERVAR UNA CITA <ArrowUpRight size={21}/></Link></article>)}</div></section>
+    <section id="el-oficio" className="craft-section"><div className="craft-photos"><div className="shop-image"><Image src="/images/barber-shop.jpg" alt="Sillones clásicos de barbería, espejos y lámparas sobre un muro de ladrillo" fill sizes="(max-width:760px) 90vw, 47vw" /></div><span className="photo-label">EL ESPÍRITU DE LA BARBERÍA CLÁSICA</span><div className="detail-image"><Image src="/images/barber-detail.jpg" alt="Detalle del trabajo con tijera y peine en una barbería" fill sizes="(max-width:760px) 45vw, 22vw" /></div></div><div className="craft-copy"><p className="overline">02 / MÁS QUE UN CORTE</p><h2>LO CLÁSICO<br />NO SE COPIA.<br /><em>SE LLEVA.</em></h2><p>La tijera, el espejo, el sillón. Nos inspira ese ritual de parar un momento y dedicarle tiempo a tu estilo.</p><p>Una barbería con alma de barrio y una forma sencilla de reservar. El resto empieza cuando te sientas.</p><a href="#como-reservar" className="text-link">Así empieza tu próxima cita <ArrowRight size={19}/></a></div></section>
+    <section id="como-reservar" className="booking-section section-wrap"><div className="section-heading"><div><p className="overline">03 / SIN DARLE MÁS VUELTAS</p><h2>DE AQUÍ<br />AL SILLÓN.</h2></div><Link href="/register" className="v-button dark">EMPEZAR MI RESERVA <ArrowUpRight size={20}/></Link></div><div className="steps-grid"><article><span>01</span><h3>HAZTE UN ESPACIO</h3><p>Crea tu cuenta o inicia sesión para tener tus citas siempre a mano.</p></article><article><span>02</span><h3>ELIGE TU MOMENTO</h3><p>Consulta los horarios libres, selecciona uno y cuéntanos qué corte buscas.</p></article><article><span>03</span><h3>ESPERA LA CONFIRMACIÓN</h3><p>El barbero revisa tu solicitud. Consulta el estado desde tu cuenta.</p></article></div></section>
+    <section className="faq-section section-wrap"><div><p className="overline">ANTES DE SENTARTE</p><h2>TODO CLARO.<br />COMO TU CORTE.</h2></div><div className="faq-list"><details><summary>¿Necesito una cuenta para reservar?<span>+</span></summary><p>Sí. Tu cuenta te permite solicitar citas y consultar su estado, sin perder de vista tus reservas.</p></details><details><summary>¿Mi cita queda confirmada al reservar?<span>+</span></summary><p>Primero queda pendiente. El barbero revisa tu solicitud y la confirma o cancela. Puedes ver el estado en “Mis citas”.</p></details><details><summary>¿Puedo cambiar o cancelar una cita?<span>+</span></summary><p>Puedes reprogramar o cancelar tus citas mientras estén pendientes. Las citas confirmadas las gestiona el barbero.</p></details><details><summary>¿Por qué no aparecen horarios disponibles?<span>+</span></summary><p>Los horarios dependen de la disponibilidad del barbero. Si un día está completo o no tiene atención programada, prueba otra fecha.</p></details></div></section>
+    <section className="final-cta"><span className="cta-spark" aria-hidden="true">✦</span><div><p className="overline">UN CAMBIO DE LOOK EMPIEZA CON UN CLIC</p><h2>TE TOCA VERTE BIEN.</h2></div><Link href="/login" className="v-button light">RESERVAR MI CITA <ArrowUpRight size={20}/></Link></section>
+  </main><SiteFooter /></div>;
 }

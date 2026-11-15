@@ -18,6 +18,7 @@ export type Appointment = {
   start_at: string;
   end_at: string;
   description?: string | null;
+  cancel_reason?: string | null;
   status: AppointmentStatus;
   client_id?: string; // provider view (MVP)
 };

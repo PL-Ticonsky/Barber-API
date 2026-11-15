@@ -36,8 +36,11 @@ from app.repositories.appointment_repo import (
     get_appointment_by_id,
 )
 
-from app.schemas.appointment import AppointmentOut
-from app.services.appointment_service import cancel_client_appointment, AppointmentNotFoundError, InvalidStatusTransitionError
+from app.services.appointment_service import (
+    cancel_client_appointment,
+    AppointmentNotFoundError,
+    InvalidStatusTransitionError,
+)
 
 # Router for global /appointments endpoints
 router = APIRouter(tags=["appointments"])
@@ -128,14 +131,16 @@ def cancel_appointment(
     current_user: User = Depends(require_client),
 ):
     try:
-        appt = cancel_client_appointment(db=db, client_id=current_user.id, appointment_id=appointment_id)
+        appt = cancel_client_appointment(
+            db=db, client_id=current_user.id, appointment_id=appointment_id
+        )
         return appt
     except AppointmentNotFoundError:
         raise HTTPException(status_code=404, detail="APPOINTMENT_NOT_FOUND")
     except InvalidStatusTransitionError:
         raise HTTPException(status_code=400, detail="INVALID_STATUS_TRANSITION")
 
-from uuid import UUID
+
 from app.schemas.appointment import AppointmentRescheduleIn
 
 from app.services.appointment_service import (
@@ -143,6 +148,7 @@ from app.services.appointment_service import (
     AppointmentNotFoundError,
     InvalidStatusTransitionError,
 )
+
 
 @router.patch(
     "/me/appointments/{appointment_id}/reschedule",

@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, ApiError, errorMessage } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { Appointment, Me, Slot } from "@/lib/types";
-import { fmtDateTimeLocal, fmtTimeLocal, toIsoWithOffset } from "@/lib/time";
+import { fmtDateTimeLocal, fmtTimeLocal, providerToday, providerDate } from "@/lib/time";
 
+import { DashboardIntro } from "@/components/dashboard-intro";
 import { AppNavbar } from "@/components/app-navbar";
 import { EmptyState } from "@/components/empty-state";
 
@@ -16,9 +17,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+
+const statusLabel: Record<string, string> = { pending: "Pendiente", confirmed: "Confirmada", canceled: "Cancelada" };
 
 function statusBadgeVariant(s: string) {
   if (s === "confirmed") return "default";
@@ -30,14 +33,14 @@ export default function ClientDashboard() {
   const [me, setMe] = useState<Me | null>(null);
 
   // Book tab
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10)); // YYYY-MM-DD
+  const [date, setDate] = useState(() => providerToday()); // YYYY-MM-DD
   const slotMinutes = 30;
 
   const [slots, setSlots] = useState<Slot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
 
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
-  const [desc, setDesc] = useState("Haircut");
+  const [desc, setDesc] = useState("Corte de cabello");
   const [createLoading, setCreateLoading] = useState(false);
 
   // My appointments
@@ -55,10 +58,11 @@ export default function ClientDashboard() {
   const [rsPick, setRsPick] = useState<Slot | null>(null);
   const [rsLoading, setRsLoading] = useState(false);
 
-  const token = useMemo(() => getToken(), []);
+  const slotRequest = useRef(0);
+  const rescheduleRequest = useRef(0);
 
   useEffect(() => {
-    if (!token) {
+    if (!getToken()) {
       window.location.href = "/login";
       return;
     }
@@ -77,9 +81,12 @@ export default function ClientDashboard() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, []);
 
   async function loadSlots(d = date) {
+    if (!d) return;
+    const request = ++slotRequest.current;
+    setSelectedSlot(null);
     setSlotsLoading(true);
     setSlots([]);
     try {
@@ -87,12 +94,13 @@ export default function ClientDashboard() {
         `/availability/slots?date=${encodeURIComponent(d)}&slot_minutes=${slotMinutes}`,
         { method: "GET" }
       );
+      if (request !== slotRequest.current) return;
       setSlots(data);
-      if (data.length === 0) toast.message("No slots available for this day");
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to load slots");
+      if (data.length === 0) toast.message("No hay turnos disponibles para este día");
+    } catch (err) {
+      toast.error(errorMessage(err, "No pudimos cargar los horarios."));
     } finally {
-      setSlotsLoading(false);
+      if (request === slotRequest.current) setSlotsLoading(false);
     }
   }
 
@@ -101,8 +109,8 @@ export default function ClientDashboard() {
     try {
       const data = await api<Appointment[]>("/me/appointments", { method: "GET" });
       setAppointments(data);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to load appointments");
+    } catch (err) {
+      toast.error(errorMessage(err, "No pudimos cargar las citas."));
     } finally {
       setApptsLoading(false);
     }
@@ -122,16 +130,22 @@ export default function ClientDashboard() {
         }),
       });
 
-      toast.success("Appointment created (pending)");
+      toast.success("Cita solicitada. Espera la confirmación del barbero.");
       setSelectedSlot(null);
-      await loadAppointments();
-    } catch (err: any) {
-      if (err?.status === 409) toast.error("This time is no longer available");
-      else if (err?.status === 422 && String(err?.message).includes("OUTSIDE_AVAILABILITY"))
-        toast.error("Outside working hours");
-      else if (err?.status === 422 && String(err?.message).includes("INVALID_TIME_RANGE"))
-        toast.error("Invalid time range");
-      else toast.error(err?.message || "Failed to create appointment");
+      await Promise.all([loadAppointments(), loadSlots()]);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.error("Ese turno acaba de ocuparse. Elige otro horario.");
+        setSelectedSlot(null);
+        setRsPick(null);
+        await loadSlots();
+        if (reschedule) await loadRescheduleSlots(rsDate);
+      }
+      else if (err instanceof ApiError && err.status === 422 && errorMessage(err).includes("OUTSIDE_AVAILABILITY"))
+        toast.error("Elige un turno dentro del horario de atención.");
+      else if (err instanceof ApiError && err.status === 422 && errorMessage(err).includes("INVALID_TIME_RANGE"))
+        toast.error("Revisa el horario de tu cita.");
+      else toast.error(errorMessage(err, "No pudimos solicitar la cita."));
     } finally {
       setCreateLoading(false);
     }
@@ -142,31 +156,34 @@ export default function ClientDashboard() {
     setCancelLoading(true);
     try {
       await api(`/me/appointments/${id}/cancel`, { method: "PATCH" });
-      toast.success("Appointment canceled");
+      toast.success("Cita cancelada. El horario vuelve a estar disponible.");
       setCancelId(null);
-      await loadAppointments();
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to cancel");
+      await Promise.all([loadAppointments(), loadSlots()]);
+    } catch (err) {
+      toast.error(errorMessage(err, "No pudimos cancelar la cita."));
     } finally {
       setCancelLoading(false);
     }
   }
 
   async function loadRescheduleSlots(d: string) {
+    if (!d || !reschedule) return;
+    const request = ++rescheduleRequest.current;
     setRsSlotsLoading(true);
     setRsSlots([]);
     setRsPick(null);
     try {
       const data = await api<Slot[]>(
-        `/availability/slots?date=${encodeURIComponent(d)}&slot_minutes=${slotMinutes}`,
+        `/availability/slots?date=${encodeURIComponent(d)}&slot_minutes=${slotMinutes}&exclude_appointment_id=${reschedule.id}`,
         { method: "GET" }
       );
+      if (request !== rescheduleRequest.current) return;
       setRsSlots(data);
-      if (data.length === 0) toast.message("No slots available for this day");
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to load slots");
+      if (data.length === 0) toast.message("No hay turnos disponibles para este día");
+    } catch (err) {
+      toast.error(errorMessage(err, "No pudimos cargar los horarios."));
     } finally {
-      setRsSlotsLoading(false);
+      if (request === rescheduleRequest.current) setRsSlotsLoading(false);
     }
   }
 
@@ -181,68 +198,77 @@ export default function ClientDashboard() {
           end_at: rsPick.end_at,
         }),
       });
-      toast.success("Rescheduled");
+      toast.success("Tu cita tiene un nuevo horario.");
       setReschedule(null);
-      await loadAppointments();
-    } catch (err: any) {
-      if (err?.status === 409) toast.error("This time is no longer available");
-      else toast.error(err?.message || "Failed to reschedule");
+      await Promise.all([loadAppointments(), loadSlots()]);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.error("Ese turno acaba de ocuparse. Elige otro horario.");
+        setSelectedSlot(null);
+        setRsPick(null);
+        await loadSlots();
+        if (reschedule) await loadRescheduleSlots(rsDate);
+      }
+      else toast.error(errorMessage(err, "No pudimos cambiar el horario."));
     } finally {
       setRsLoading(false);
     }
   }
 
   return (
-    <div>
+    <div id="top" className="dashboard-shell">
       <AppNavbar title="Client" email={me?.email} />
 
-      <main className="mx-auto max-w-5xl px-4 py-6">
+      <main id="main-content" className="dashboard-page">
+        <DashboardIntro/>
         <Tabs defaultValue="book" className="w-full">
           <TabsList>
-            <TabsTrigger value="book">Book Appointment</TabsTrigger>
-            <TabsTrigger value="mine">My Appointments</TabsTrigger>
+            <TabsTrigger value="book">Reservar cita</TabsTrigger>
+            <TabsTrigger value="mine">Mis citas</TabsTrigger>
           </TabsList>
 
           <TabsContent value="book" className="mt-6">
-            <Card className="p-5 rounded-2xl">
+            <Card className="dashboard-panel">
               <div className="flex flex-col md:flex-row md:items-end gap-4 justify-between">
                 <div className="grid gap-2">
-                  <Label>Date</Label>
+                  <Label htmlFor="booking-date">Fecha</Label>
                   <Input
-                    type="date"
+                    id="booking-date" type="date"
                     value={date}
-                    onChange={(e) => setDate(e.target.value)}
+                    min={providerToday()}
+                    onChange={(e) => { ++slotRequest.current; setDate(e.target.value); setSelectedSlot(null); setSlots([]); setSlotsLoading(false); }}
                   />
                 </div>
 
                 <div className="grid gap-2">
-                  <Label>Slot minutes</Label>
-                  <Input value={slotMinutes} disabled />
+                  <Label htmlFor="slot-duration">Duración del turno</Label>
+                  <Input id="slot-duration" value={`${slotMinutes} minutos`} disabled />
                 </div>
 
                 <Button onClick={() => loadSlots(date)} disabled={slotsLoading}>
-                  {slotsLoading ? "Loading..." : "Load slots"}
+                  {slotsLoading ? "Cargando…" : "Ver horarios"}
                 </Button>
               </div>
 
               <div className="mt-6">
                 {slotsLoading ? (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="slots-grid">
                     {Array.from({ length: 8 }).map((_, i) => (
                       <Skeleton key={i} className="h-14 rounded-xl" />
                     ))}
                   </div>
                 ) : slots.length === 0 ? (
                   <EmptyState
-                    title="No slots available for this day"
-                    description="Try another date."
+                    title="No hay turnos disponibles para este día"
+                    description="Prueba otra fecha para encontrar tu próximo turno."
                   />
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="slots-grid">
                     {slots.map((s) => (
                       <Card
                         key={s.start_at}
-                        className="p-3 rounded-xl hover:shadow-sm transition cursor-pointer"
+                        className="slot-choice" role="button" tabIndex={0}
+                        onKeyDown={(e) => { if(e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedSlot(s); } }}
                         onClick={() => setSelectedSlot(s)}
                       >
                         <div className="text-lg font-semibold">
@@ -259,26 +285,27 @@ export default function ClientDashboard() {
             </Card>
 
             <Dialog open={!!selectedSlot} onOpenChange={(o) => !o && setSelectedSlot(null)}>
-              <DialogContent className="rounded-2xl">
+              <DialogContent className="booking-dialog">
                 <DialogHeader>
-                  <DialogTitle>Confirm appointment</DialogTitle>
+                  <DialogTitle>Tu próxima cita</DialogTitle>
+                  <DialogDescription>Revisa los detalles antes de guardar los cambios.</DialogDescription>
                 </DialogHeader>
 
                 {selectedSlot ? (
                   <div className="grid gap-4">
-                    <Card className="p-4 rounded-2xl">
-                      <div className="text-sm text-muted-foreground">Time</div>
+                    <Card className="appointment-card">
+                      <div className="text-sm text-muted-foreground">Tu horario</div>
                       <div className="font-medium">
                         {fmtDateTimeLocal(selectedSlot.start_at)} → {fmtDateTimeLocal(selectedSlot.end_at)}
                       </div>
                     </Card>
 
                     <div className="grid gap-2">
-                      <Label>Description (optional)</Label>
+                      <Label>¿Qué corte tienes en mente? (opcional)</Label>
                       <Textarea
                         value={desc}
-                        onChange={(e) => setDesc(e.target.value)}
-                        placeholder="Haircut"
+                        maxLength={500} onChange={(e) => setDesc(e.target.value)}
+                        placeholder="Corte de cabello"
                       />
                     </div>
                   </div>
@@ -286,10 +313,10 @@ export default function ClientDashboard() {
 
                 <DialogFooter className="gap-2">
                   <Button variant="outline" onClick={() => setSelectedSlot(null)}>
-                    Cancel
+                    Cancelar
                   </Button>
                   <Button onClick={createAppointment} disabled={createLoading}>
-                    {createLoading ? "Requesting..." : "Request appointment"}
+                    {createLoading ? "Solicitando…" : "Solicitar cita"}
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -297,16 +324,16 @@ export default function ClientDashboard() {
           </TabsContent>
 
           <TabsContent value="mine" className="mt-6">
-            <Card className="p-5 rounded-2xl">
-              <div className="flex items-center justify-between">
+            <Card className="dashboard-panel">
+              <div className="flex flex-wrap gap-3 items-center justify-between">
                 <div>
-                  <div className="text-lg font-semibold">My appointments</div>
+                  <div className="text-lg font-semibold">Mis citas</div>
                   <div className="text-sm text-muted-foreground">
-                    Pending can be canceled or rescheduled.
+                    Puedes cambiar o cancelar tus citas mientras estén pendientes.
                   </div>
                 </div>
                 <Button variant="outline" onClick={loadAppointments} disabled={apptsLoading}>
-                  Refresh
+                  Actualizar
                 </Button>
               </div>
 
@@ -318,10 +345,10 @@ export default function ClientDashboard() {
                     <Skeleton className="h-20 rounded-2xl" />
                   </>
                 ) : appointments.length === 0 ? (
-                  <EmptyState title="No appointments yet" description="Book your first slot." />
+                  <EmptyState title="Tu agenda tiene espacio" description="Reserva tu primera cita y empieza con buen pie." />
                 ) : (
                   appointments.map((a) => (
-                    <Card key={a.id} className="p-4 rounded-2xl">
+                    <Card key={a.id} className="appointment-card">
                       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                         <div>
                           <div className="font-medium">
@@ -329,19 +356,20 @@ export default function ClientDashboard() {
                           </div>
                           <div className="text-sm text-muted-foreground">
                             {a.description || "—"}
+                            {a.cancel_reason && <p>Motivo de cancelación: {a.cancel_reason}</p>}
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
-                          <Badge variant={statusBadgeVariant(a.status)}>{a.status}</Badge>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge className={`status-badge status-${a.status}`} variant={statusBadgeVariant(a.status)}>{statusLabel[a.status]}</Badge>
 
                           {a.status === "pending" ? (
                             <>
-                              <Button variant="outline" onClick={() => setReschedule({ id: a.id })}>
-                                Reschedule
+                              <Button variant="outline" onClick={() => { ++rescheduleRequest.current; setRsSlots([]); setRsPick(null); setRsSlotsLoading(false); setRsDate(providerDate(a.start_at)); setReschedule({ id: a.id }); }}>
+                                Cambiar horario
                               </Button>
                               <Button variant="destructive" onClick={() => setCancelId(a.id)}>
-                                Cancel
+                                Cancelar
                               </Button>
                             </>
                           ) : null}
@@ -355,23 +383,24 @@ export default function ClientDashboard() {
 
             {/* Cancel modal */}
             <Dialog open={!!cancelId} onOpenChange={(o) => !o && setCancelId(null)}>
-              <DialogContent className="rounded-2xl">
+              <DialogContent className="booking-dialog">
                 <DialogHeader>
-                  <DialogTitle>Cancel appointment?</DialogTitle>
+                  <DialogTitle>¿Cancelamos esta cita?</DialogTitle>
+                  <DialogDescription>Revisa los detalles antes de guardar los cambios.</DialogDescription>
                 </DialogHeader>
                 <div className="text-sm text-muted-foreground">
-                  This action can’t be undone.
+                  El horario quedará libre para otra persona. Esta acción no se puede deshacer.
                 </div>
                 <DialogFooter className="gap-2">
                   <Button variant="outline" onClick={() => setCancelId(null)}>
-                    Keep
+                    Conservar cita
                   </Button>
                   <Button
                     variant="destructive"
                     onClick={() => cancelId && cancelAppointment(cancelId)}
                     disabled={cancelLoading}
                   >
-                    {cancelLoading ? "Canceling..." : "Cancel appointment"}
+                    {cancelLoading ? "Cancelando…" : "Cancelar cita"}
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -379,47 +408,49 @@ export default function ClientDashboard() {
 
             {/* Reschedule modal */}
             <Dialog open={!!reschedule} onOpenChange={(o) => !o && setReschedule(null)}>
-              <DialogContent className="rounded-2xl">
+              <DialogContent className="booking-dialog">
                 <DialogHeader>
-                  <DialogTitle>Reschedule</DialogTitle>
+                  <DialogTitle>Cambiar horario</DialogTitle>
+                  <DialogDescription>Revisa los detalles antes de guardar los cambios.</DialogDescription>
                 </DialogHeader>
 
                 <div className="grid gap-4">
                   <div className="grid gap-2">
-                    <Label>New date</Label>
+                    <Label>Nueva fecha</Label>
                     <div className="flex gap-2">
                       <Input
                         type="date"
                         value={rsDate}
-                        onChange={(e) => setRsDate(e.target.value)}
+                        min={providerToday()}
+                        onChange={(e) => { ++rescheduleRequest.current; setRsDate(e.target.value); setRsPick(null); setRsSlots([]); setRsSlotsLoading(false); }}
                       />
                       <Button
                         variant="outline"
                         onClick={() => loadRescheduleSlots(rsDate)}
                         disabled={rsSlotsLoading}
                       >
-                        {rsSlotsLoading ? "Loading..." : "Load slots"}
+                        {rsSlotsLoading ? "Cargando…" : "Ver horarios"}
                       </Button>
                     </div>
                   </div>
 
                   {rsSlotsLoading ? (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="slots-grid">
                       {Array.from({ length: 8 }).map((_, i) => (
                         <Skeleton key={i} className="h-14 rounded-xl" />
                       ))}
                     </div>
                   ) : rsSlots.length === 0 ? (
-                    <EmptyState title="No slots" description="Try another date." />
+                    <EmptyState title="Todavía no hay turnos para mostrar" description="Prueba otra fecha para encontrar tu próximo turno." />
                   ) : (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="slots-grid">
                       {rsSlots.map((s) => {
                         const active = rsPick?.start_at === s.start_at;
                         return (
                           <Card
                             key={s.start_at}
-                            className={`p-3 rounded-xl cursor-pointer transition ${
-                              active ? "border-primary shadow-sm" : "hover:shadow-sm"
+                            role="button" tabIndex={0} aria-pressed={active} onKeyDown={(e) => { if(e.key === "Enter" || e.key === " ") { e.preventDefault(); setRsPick(s); } }} className={`slot-choice ${
+                              active ? "slot-selected" : ""
                             }`}
                             onClick={() => setRsPick(s)}
                           >
@@ -438,10 +469,10 @@ export default function ClientDashboard() {
 
                 <DialogFooter className="gap-2">
                   <Button variant="outline" onClick={() => setReschedule(null)}>
-                    Close
+                    Cerrar
                   </Button>
                   <Button onClick={doReschedule} disabled={!rsPick || rsLoading}>
-                    {rsLoading ? "Saving..." : "Save new time"}
+                    {rsLoading ? "Guardando…" : "Guardar nuevo horario"}
                   </Button>
                 </DialogFooter>
               </DialogContent>

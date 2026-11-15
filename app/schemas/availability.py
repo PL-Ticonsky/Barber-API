@@ -14,9 +14,17 @@ class AvailabilityBlockIn(BaseModel):
     """
     Input block for POST /barber/availability/bulk
     """
+
     weekday: int = Field(ge=0, le=6)
     start_time: time
     end_time: time
+
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def local_time_only(cls, value: time):
+        if value.tzinfo is not None:
+            raise ValueError("Weekly hours must be local times without a timezone")
+        return value
 
     @field_validator("end_time")
     @classmethod
@@ -31,6 +39,7 @@ class AvailabilityBlockOut(BaseModel):
     """
     Output representation of an availability block.
     """
+
     id: str
     weekday: int
     start_time: time

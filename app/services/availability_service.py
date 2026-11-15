@@ -1,88 +1,40 @@
-"""
-app/services/availability_service.py
-
-Purpose:
-- Business logic for provider availability.
-- Implements REPLACE strategy for bulk availability updates.
-
-Rules:
-- weekday in 0..6
-- start_time < end_time
-- no overlapping blocks within the same weekday (in the incoming payload)
-"""
-
-from __future__ import annotations
+"""Weekly availability and future, unoccupied booking slots."""
 
 from collections import defaultdict
-from datetime import time
-
-from sqlalchemy.orm import Session
-
-from app.models.availability import Availability
-from app.repositories.availability_repo import delete_all_availability, bulk_create_availability
-
 from datetime import date as Date, datetime, timedelta, timezone
-from app.repositories.availability_repo import list_availability
+from uuid import UUID
+from zoneinfo import ZoneInfo
+from sqlalchemy.orm import Session
+from app.models.availability import Availability
+from app.repositories.availability_repo import (
+    delete_all_availability,
+    bulk_create_availability,
+    list_availability,
+)
+from app.repositories.appointment_repo import (
+    find_overlapping_appointments,
+    lock_schedule,
+)
+
 
 class AvailabilityOverlapError(ValueError):
-    """Raised when incoming availability blocks overlap within the same weekday."""
-
-
-def _overlaps(a_start: time, a_end: time, b_start: time, b_end: time) -> bool:
-    """
-    Returns True if [a_start, a_end) overlaps [b_start, b_end)
-    """
-    return a_start < b_end and b_start < a_end
+    pass
 
 
 def replace_availability(db: Session, *, blocks_in: list[dict]) -> list[Availability]:
-    """
-    Replace all existing availability with the provided blocks.
-
-    Input format:
-    - blocks_in: list of dicts with weekday, start_time, end_time
-
-    Transaction behavior:
-    - delete existing
-    - insert new
-    - commit
-    """
-    # 1) Validate no overlap inside payload per weekday
-    by_day: dict[int, list[tuple[time, time]]] = defaultdict(list)
-
+    by_day = defaultdict(list)
     for b in blocks_in:
-        weekday = b["weekday"]
-        start_time = b["start_time"]
-        end_time = b["end_time"]
-        by_day[weekday].append((start_time, end_time))
-
-    for weekday, intervals in by_day.items():
-        intervals_sorted = sorted(intervals, key=lambda x: x[0])
-        for i in range(len(intervals_sorted) - 1):
-            a_start, a_end = intervals_sorted[i]
-            b_start, b_end = intervals_sorted[i + 1]
-            if _overlaps(a_start, a_end, b_start, b_end):
-                raise AvailabilityOverlapError(f"OVERLAP_IN_WEEKDAY_{weekday}")
-
-    # 2) Build ORM objects
-    rows = [
-        Availability(
-            weekday=b["weekday"],
-            start_time=b["start_time"],
-            end_time=b["end_time"],
-            is_active=True,
-        )
-        for b in blocks_in
-    ]
-
-    # 3) Replace in DB
+        by_day[b["weekday"]].append((b["start_time"], b["end_time"]))
+    for weekday, blocks in by_day.items():
+        blocks.sort()
+        if any(a[1] > b[0] for a, b in zip(blocks, blocks[1:])):
+            raise AvailabilityOverlapError(f"OVERLAP_IN_WEEKDAY_{weekday}")
+    lock_schedule(db)
+    rows = [Availability(**b, is_active=True) for b in blocks_in]
     delete_all_availability(db)
     bulk_create_availability(db, rows)
-
     db.commit()
-
     return rows
-
 
 
 def generate_slots_for_date(
@@ -91,61 +43,40 @@ def generate_slots_for_date(
     date: Date,
     slot_minutes: int = 30,
     tz_name: str = "America/Bogota",
+    exclude_appointment_id: UUID | None = None,
 ) -> list[dict]:
-    """
-    Generate available slots for a given calendar date based on weekly availability.
-
-    Returns:
-        List[dict] like:
-        [
-          {"start_at": "2026-01-21T15:00:00Z", "end_at": "2026-01-21T15:30:00Z"},
-          ...
-        ]
-
-    MVP Notes:
-    - We generate slots only from availability blocks.
-    - Later we will subtract existing appointments (pending/confirmed).
-    - We return times in UTC (Z) to match the rest of the system.
-    """
-    if slot_minutes <= 0 or slot_minutes > 240:
-        # keep it sane for MVP
+    if not 5 <= slot_minutes <= 240:
         raise ValueError("INVALID_SLOT_MINUTES")
-
-    weekday = date.weekday()  # Monday=0 ... Sunday=6
-
-    # Pull availability blocks and filter for this weekday and active
+    zone = ZoneInfo(tz_name)
+    start_day = datetime.combine(date, datetime.min.time(), zone)
+    end_day = datetime.combine(date + timedelta(days=1), datetime.min.time(), zone)
+    now = datetime.now(timezone.utc)
+    if end_day <= now:
+        return []
+    occupied = find_overlapping_appointments(
+        db,
+        start_at=start_day,
+        end_at=end_day,
+        exclude_appointment_id=exclude_appointment_id,
+    )
     blocks = [
-        b for b in list_availability(db)
-        if b.is_active and b.weekday == weekday
+        b for b in list_availability(db) if b.is_active and b.weekday == date.weekday()
     ]
-
-    # If no blocks, just return empty list (200 [])
-    slot_delta = timedelta(minutes=slot_minutes)
-
-    # Use Python's built-in zoneinfo (no external dependency)
-    from zoneinfo import ZoneInfo
-    local_tz = ZoneInfo(tz_name)
-
-    results: list[dict] = []
-
+    delta = timedelta(minutes=slot_minutes)
+    results = []
     for b in blocks:
-        start_local = datetime.combine(date, b.start_time).replace(tzinfo=local_tz)
-        end_local = datetime.combine(date, b.end_time).replace(tzinfo=local_tz)
-
-        current = start_local
-        while current + slot_delta <= end_local:
-            slot_start_utc = current.astimezone(timezone.utc)
-            slot_end_utc = (current + slot_delta).astimezone(timezone.utc)
-
-            results.append(
-                {
-                    "start_at": slot_start_utc.isoformat().replace("+00:00", "Z"),
-                    "end_at": slot_end_utc.isoformat().replace("+00:00", "Z"),
-                }
-            )
-
-            current += slot_delta
-
-    # Sort just in case
-    results.sort(key=lambda x: x["start_at"])
-    return results
+        current = datetime.combine(date, b.start_time, zone).astimezone(timezone.utc)
+        stop = datetime.combine(date, b.end_time, zone).astimezone(timezone.utc)
+        while current + delta <= stop:
+            end = current + delta
+            if current > now and not any(
+                a.start_at < end and current < a.end_at for a in occupied
+            ):
+                results.append(
+                    {
+                        "start_at": current.isoformat().replace("+00:00", "Z"),
+                        "end_at": end.isoformat().replace("+00:00", "Z"),
+                    }
+                )
+            current = end
+    return sorted(results, key=lambda s: s["start_at"])

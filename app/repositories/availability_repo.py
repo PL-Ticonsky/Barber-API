@@ -29,7 +29,9 @@ def delete_all_availability(db: Session) -> None:
     db.execute(delete(Availability))
 
 
-def bulk_create_availability(db: Session, blocks: list[Availability]) -> list[Availability]:
+def bulk_create_availability(
+    db: Session, blocks: list[Availability]
+) -> list[Availability]:
     """
     Insert many Availability rows.
     Returns the same list (after flush, ids should be present).
