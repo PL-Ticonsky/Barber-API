@@ -50,6 +50,18 @@ frontend/src/
 Docs/              # Contratos, decisiones y capturas
 ```
 
+## Cómo se gestiona una cita
+
+La disponibilidad semanal y las citas activas determinan qué horarios puede elegir el cliente.
+
+```mermaid
+flowchart LR
+    A["Cliente · elige un turno"] --> B["FastAPI · recibe la solicitud"]
+    B --> C["PostgreSQL · evita solapamientos"]
+    C --> D["Cita pendiente"]
+    D --> E["Barbero · confirma o cancela"]
+```
+
 ## Inicio local
 
 Requiere Python 3.12+, uv, PostgreSQL 15+ y Node.js 20.9+ con npm. Crea una base vacía cuyo propietario sea el usuario de conexión; los comandos de migración no crean la base ni el rol.
