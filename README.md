@@ -1,30 +1,30 @@
-# La Buena Tijera · Sistema de reservas
+# La Buena Tijera · **Reservas online para una barbería clásica.** Los clientes eligen su cita y el barbero organiza su agenda desde un panel propio.
 
-Sistema de reservas para una barbería con un único profesional. Backend FastAPI y PostgreSQL; interfaz Next.js para clientes y barbero.
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Next.js](https://img.shields.io/badge/Next.js-171717?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![GitHub Actions](https://github.com/PL-Ticonsky/Reserves_API_FastAPI/actions/workflows/verify.yml/badge.svg?branch=main)](https://github.com/PL-Ticonsky/Reserves_API_FastAPI/actions/workflows/verify.yml)
+[![Licencia MIT](https://img.shields.io/badge/Licencia-MIT-E8B94F)](LICENSE)
 
-[Contrato de API](Docs/API_CONTRACT.md) · [Arquitectura](Docs/ARQUITECTURE.md) · [Capturas](#vista-previa) · [Licencia MIT](LICENSE)
+[Inicio local](#inicio-local) · [Contrato de API](Docs/API_CONTRACT.md) · [Arquitectura](Docs/ARQUITECTURE.md)
 
 ## Vista previa
 
-Portada completa de La Buena Tijera en escritorio.
+![Portada de La Buena Tijera con la navegación, el botón de reservas y una fotografía de la barbería](Docs/assets/frontend/la-buena-tijera.png)
 
-![Portada completa de La Buena Tijera en escritorio](Docs/assets/frontend/portada-escritorio.jpg)
+## Cómo se usa
 
-<details>
-<summary>Ver la portada completa en móvil</summary>
+| Cliente | Barbero |
+| --- | --- |
+| Crea una cuenta y consulta los turnos libres. | Define los bloques de atención de cada día. |
+| Solicita una cita y consulta su estado en **Mis citas**. | Filtra la agenda y confirma las solicitudes. |
+| Cambia el horario o cancela mientras la cita esté pendiente. | Cancela citas e indica el motivo si lo necesita. |
 
-![Portada completa de La Buena Tijera en móvil](Docs/assets/frontend/portada-movil.jpg)
+## Qué resuelve el sistema
 
-</details>
-
-## Funcionalidades
-
-- Registro de clientes e inicio de sesión con JWT.
-- Consulta de horarios futuros libres, descontando reservas pendientes y confirmadas.
-- Solicitud de citas, consulta personal, cancelación y reprogramación de citas pendientes.
-- Panel del barbero: lectura y reemplazo de horarios semanales, filtros de citas, confirmación y cancelación con motivo opcional.
-- Separación de permisos por rol y propiedad de las citas.
-- Restricción PostgreSQL contra reservas superpuestas, también bajo concurrencia.
+- **Disponibilidad real.** La agenda descuenta los horarios de citas pendientes y confirmadas.
+- **Reservas sin solapamientos.** PostgreSQL impide que se ocupen dos veces los mismos minutos, incluso con solicitudes simultáneas.
+- **Acceso por rol.** El cliente consulta sus propias citas y el barbero gestiona la agenda.
 
 Es un proyecto de portafolio en desarrollo. No incluye pagos, múltiples barberos ni recuperación de contraseñas. Los tokens se guardan en localStorage; cerrar sesión elimina la copia del navegador y los tokens emitidos siguen válidos hasta expirar. No se presenta como listo para producción.
 
